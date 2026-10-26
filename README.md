@@ -53,4 +53,10 @@ Angka dan kesimpulan sebaiknya diverifikasi terhadap sumber data resmi sebelum d
 
 **Umbu Domu Mahani**
 
-Fokus pada analisis data kuantitatif, riset sosial, dan analisis kebijakan publik.
+
+## Lihat Laporan Analisis Lengkap
+
+Baca laporan analisis ketimpangan kemiskinan antarprovinsi di Indonesia tahun 2025, mencakup analisis deskriptif, eksploratif, regresi linear, dan implikasi kebijakan.
+
+**[Buka Laporan Analisis Kemiskinan Provinsi Indonesia (2025)](https://umahani-art.github.io/analisis-kemiskinan-provinsi-indonesia/Data-Kemiskinan-Tiap-Provinsi.html)**
+
