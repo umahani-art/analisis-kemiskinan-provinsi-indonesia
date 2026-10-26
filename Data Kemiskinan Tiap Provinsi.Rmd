@@ -1,0 +1,349 @@
+---
+title: "Analisis Ketimpangan Kemiskinan Provinsi di Indonesia (2025)"
+author: "Umbu Domu Mahani"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    theme: cosmo
+    code_folding: hide
+---
+## 1. Ringkasan Eksekutif
+Kemiskinan nasional turun tipis pada semester II 2025, tetapi idak dijelaskan secara konsisten oleh garis kemiskinan. Analisis ini membandingkan data BPS Maret vs September 2025 pada 38 provinsi. Persentase penduduk miskin nasional turun dari 8,47% menjadi 8,25%, atau dari 23,85 juta menjadi 23,36 juta jiwa (turun sekitar 495 ribu orang). Temuan utamanya:
+
+* Penurunan luas. 35 dari 38 provinsi mencatat penurunan, dengan rata-rata −0,34 poin persentase.
+
+* Disparitas ekstrem. Jarak antara provinsi tertinggi dan terendah pada September adalah 26,03 poin: Papua Tengah (29,45%) vs Bali (3,42%). Papua Pegunungan tertinggi pada Maret (30,03%), lalu turun 2,82 poin menjadi 27,21%, penurunan terbesar secara nasional. Keenam provinsi Papua berada di atas 17%, dan NTT sama tingginya (17,50%).
+
+* Jumlah absolut vs tingkat kemiskinan. Jawa menampung 12,3 juta penduduk miskin (52,8% dari total nasional), tetapi porsi ini lebih kecil dari porsi penduduknya (sekitar 55,7%) dan tingkat kemiskinannya hanya 7,8%. Sebaliknya, Maluku & Papua menyumbang 6,2% penduduk miskin dari hanya sekitar 2,8% penduduk, dengan tingkat kemiskinan 18,2%.
+
+* Tiga provinsi naik, perubahannya kecil. Papua Tengah (+0,55 poin, +7,6 ribu orang), Riau (+0,14 poin, +14,6 ribu orang), dan Kalimantan Timur (+0,02 poin, +2,3 ribu orang). Kenaikan Riau dan Kaltim terlalu kecil untuk ditafsirkan sebagai tren, dan data ini tidak memuat penyebabnya.
+
+* Garis kemiskinan bukan prediktor yang andal. Pada 38 provinsi, hubungannya dengan persentase miskin lemah dan tidak signifikan (R² 0,065; p = 0,122), dan arahnya hanya positif karena satu provinsi, Papua Pegunungan. Tanpa enam provinsi Papua, hubungannya justru negatif dan signifikan (−1,20 poin per Rp 100 ribu; p = 0,010). Faktor lain yang tidak diukur di sini, seperti pekerjaan, pendidikan, dan infrastruktur, perlu diuji tersendiri.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+echo = TRUE,
+warning = FALSE,
+message = FALSE,
+fig.align = "center",
+comment = "#>"
+)
+```
+
+```{r load-library, include=FALSE}
+library(tidyverse)
+library(janitor)
+library(readxl)
+library(scales)
+library(broom)
+```
+
+## 2. Data Cleaning & Quality Assurance
+```{r import-dataset}
+raw_data <- read_excel("Jumlah dan Persentase Penduduk Miskin Menurut Provinsi, 2025.xlsx")
+
+glimpse(raw_data)
+```
+
+```{r data-quality-check}
+colSums(is.na(raw_data))
+cat("Jumlah baris duplikat:", sum(duplicated(raw_data)), "\n")
+cat("Baris 'Indonesia' ada?", "Indonesia" %in% raw_data$Provinsi, "\n")
+cleaned_df <- unique(raw_data)
+```
+```{r data-cleaning}
+cleaned_data <- cleaned_df |> 
+
+select(-8)  |> 
+clean_names() |> 
+rename_with(~ str_replace(.x, "_ribu_ribu$", "_ribu"), starts_with("jumlah")) |>
+filter(provinsi != "Indonesia", !is.na(provinsi)) |>
+filter(!str_detect(provinsi, "Metadata|Indikator|Konsep|Definisi")) |>
+mutate(across(-provinsi, as.numeric)) |>
+drop_na()
+
+stopifnot(
+  nrow(cleaned_data) == 38,
+  all(cleaned_data$persentase_penduduk_miskin_maret > 0 & 
+      cleaned_data$persentase_penduduk_miskin_maret < 100),
+  !any(is.na(cleaned_data))
+)
+
+stopifnot(
+  abs(sum(cleaned_data$jumlah_penduduk_miskin_september_ribu) - 23359.71) < 0.1,
+  abs(sum(cleaned_data$jumlah_penduduk_miskin_maret_ribu) - 23854.56) < 0.1
+)
+
+cat("✅ QA Passed: 38 provinsi, 0 NA, nilai persentase valid.")
+glimpse(cleaned_data)
+```
+* Catatan QA. Data sumber berisi 38 provinsi, satu baris agregat "Indonesia", dan baris metadata yang terduplikasi (itu sebabnya ada 2 baris duplikat dan 46 baris awal). Setelah dibersihkan, tersisa 38 provinsi tanpa nilai kosong. Sebagai pemeriksaan silang tambahan, jumlah penduduk miskin 38 provinsi menjumlah tepat ke baris Indonesia (Maret 23.854,56 ribu; September 23.359,71 ribu), dan rata-rata tertimbang persentase provinsi (8,25%) sama dengan angka nasional BPS. Baris "Indonesia" sengaja dikeluarkan dari analisis antarprovinsi, tetapi dipakai sebagai angka acuan nasional (8,47% ke 8,25%).
+
+* Keterbatasan. Pemeriksaan di stopifnot() hanya mencakup persentase Maret; sebaiknya diperluas ke persentase September dan ke konsistensi antara jumlah dan persentase. Data ini juga hanya memuat satu variabel penjelas (garis kemiskinan), sehingga tidak cukup untuk menjelaskan sebab perbedaan antarprovinsi. Angka provinsi berasal dari survei sampel (Susenas), jadi perubahan yang sangat kecil berada dalam kisaran galat sampling.
+
+```{r data-manipulation}
+cleaned_panjang <- cleaned_data |> 
+  pivot_longer(
+    cols = -provinsi,
+               names_to = c(".value", "periode"),
+               names_pattern = "(.+)_(maret|september).*"
+) |> 
+  mutate(periode = str_to_title(periode))
+
+print(cleaned_panjang, n = 4)
+```
+## 3. Analisis Deskriptif: Maret vs September
+```{r data-visualisation, fig.height=10, fig.width=9}
+provinsi_order <- cleaned_panjang |> 
+  group_by(provinsi) |> 
+  summarise(rata2 = mean(persentase_penduduk_miskin, na.rm = TRUE)) |> 
+  arrange(rata2) |> 
+  pull(provinsi)
+
+plot_kemiskinan <- cleaned_panjang |> 
+  mutate(provinsi = factor(provinsi, levels = provinsi_order)) |> 
+  ggplot(aes(x = provinsi,
+           y = persentase_penduduk_miskin,
+           fill = periode)) +
+  geom_col(position = position_dodge(width = 0.85), width = 0.8) +
+    geom_text(
+    aes(label = sprintf("%.2f%%", persentase_penduduk_miskin)),
+    hjust = -0.15, size = 2.8, color = "black",
+    position = position_dodge(width = 0.85)
+  ) +
+  scale_y_continuous(
+    expand = expansion(mult = c(0, 0.18)),
+    labels = scales::label_number(suffix = "%")
+  ) +
+  scale_fill_manual(values = c("Maret" = "#3B82F6", "September" = "#F59E0B")) +
+  coord_flip() +
+  labs(
+    title = "Persentase Penduduk Miskin per Provinsi: Maret vs September 2025",
+    subtitle = "Diurutkan dari persentase kemiskinan terendah ke tertinggi",
+    x = NULL,
+    y = "Persentase Penduduk Miskin (%)",
+    fill = "Periode",
+    caption = "Sumber: BPS, 2025"
+  ) +
+  theme_minimal(base_size = 10) +
+  theme(
+    plot.title = element_text(face = "bold", size = 13),
+    plot.subtitle = element_text(color = "gray40"),
+    plot.caption = element_text(color = "gray50", size = 8),
+    legend.position = "top",
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+  
+print(plot_kemiskinan)
+dir.create("output", showWarnings = FALSE) 
+ggsave("output/plot-kemiskinan.png", plot_kemiskinan, width = 10, height = 10, dpi = 150, bg = "white")
+```
+#### Interpretasi Grafik: Perbandingan Kemiskinan Maret vs September 2025
+Grafik menunjukkan tiga temuan utama.
+
+* Penurunan luas, tetapi kecil di sebagian besar provinsi. Dari 38 provinsi, 35 mencatat penurunan persentase penduduk miskin dari Maret ke September 2025, dengan rata-rata −0,34 poin. Penurunan terbesar terjadi di Papua Pegunungan (30,03% → 27,21%, −2,82 poin), disusul Papua (−1,34), Nusa Tenggara Timur (−1,10), dan Papua Barat (−1,08). Penurunan di Papua Pegunungan perlu dibaca hati-hati: provinsi ini berpopulasi kecil dan baru terbentuk, sehingga galat sampling survei besar. Garis kemiskinannya juga naik paling tajam (+9,1% dibanding rata-rata nasional provinsi +5,2%), jadi penurunan 2,8 poin terjadi di tengah ambang yang makin tinggi. Penyebabnya tidak dapat disimpulkan dari data ini dan layak diverifikasi pada rilis BPS berikutnya.
+Disparitas antardaerah sangat tajam. Pada September, jarak antara provinsi tertinggi dan terendah adalah 26,03 poin: Papua Tengah (29,45%) vs Bali (3,42%). Keenam provinsi di Tanah Papua (Papua Tengah, Papua Pegunungan, Papua Barat, Papua Selatan, Papua, dan Papua Barat Daya) berada pada 17,50–29,45%, dan Nusa Tenggara Timur (17,50%) setara dengan yang terendah di kelompok itu. Di ujung bawah, Bali (3,42%), Kalimantan Selatan (3,73%), dan DKI Jakarta (4,03%) berada di bawah 4,1%.
+
+* Tiga provinsi mencatat kenaikan, dengan besaran sangat berbeda. Papua Tengah naik 0,55 poin, sedangkan Riau (+0,14) dan Kalimantan Timur (+0,02) naik tipis. Dalam jumlah orang, kenaikannya +7,6 ribu (Papua Tengah), +14,6 ribu (Riau), dan +2,3 ribu (Kaltim). Kenaikan Kaltim berada jauh di dalam kisaran galat survei dan tidak boleh dibaca sebagai perburukan. Kenaikan Papua Tengah, yang sudah menjadi provinsi dengan kemiskinan tertinggi, adalah yang paling layak diperhatikan.
+
+```{r tabel-kenaikan, warning=FALSE, echo=TRUE, message=FALSE}
+cleaned_panjang |> 
+  group_by(provinsi) |> 
+ summarise(selisih = persentase_penduduk_miskin[periode == "September"] - persentase_penduduk_miskin[periode == "Maret"]) |>
+  filter(selisih > 0) |>
+  arrange(desc(selisih)) |> 
+ knitr::kable(
+    caption = "Provinsi dengan Kenaikan Persentase Penduduk Miskin (Maret - September 2025)",
+    col.names = c("Provinsi", "Kenaikan (Poin Persentase)"),
+    digits = 2
+  )
+```
+#### Interpretasi Tabel Provinsi dengan Kenaikan Kemiskinan
+* Tabel hanya memuat tiga provinsi: Papua Tengah (+0,55 poin), Riau (+0,14), dan Kalimantan Timur (+0,02). Papua Tengah kontras dengan Papua Pegunungan yang turun paling tajam, tetapi keduanya berdekatan secara geografis dan sama-sama provinsi baru dengan angka yang rentan fluktuasi sampling. Riau dan Kaltim dikenal sebagai daerah dengan PDRB tinggi dari sektor pertambangan dan energi, tetapi data ini tidak memuat harga komoditas, inflasi daerah, atau struktur lapangan kerja, sehingga kenaikan tipis keduanya tidak dapat dikaitkan dengan guncangan komoditas. Kenaikan ini sebaiknya diperlakukan sebagai hipotesis untuk ditelusuri pada rilis BPS berikutnya (misalnya apakah berlanjut pada Maret 2026), bukan sebagai bukti "kutukan sumber daya".
+
+## 4. Analisis Eksploratif: Biaya Hidup vs Kemiskinan
+```{r scatter-garis-kemiskinan, fig.width=9, fig.height=6}
+scatter_data <- cleaned_panjang |>
+  filter(periode == "September") |>
+  mutate(sorotan = if_else(str_detect(provinsi, "Papua"), "Tanah Papua", "Lainnya"))
+
+ggplot(scatter_data, aes(garis_kemiskinan, persentase_penduduk_miskin)) +
+  geom_point(aes(color = sorotan), size = 3, alpha = 0.7) +
+  geom_text(data = filter(scatter_data, provinsi == "Papua Pegunungan"),
+            aes(label = provinsi), vjust = -1, hjust = 1,
+            fontface = "bold", color = "darkred") +
+  geom_smooth(method = "lm", se = FALSE, color = "gray50", linetype = "dashed") +
+  scale_x_continuous(labels = scales::label_number(scale = 1/1e6, prefix = "Rp ", suffix = " Juta")) +
+  scale_y_continuous(labels = scales::label_number(suffix = "%")) +
+  scale_color_manual(values = c("Tanah Papua" = "#EF4444", "Lainnya" = "#3B82F6")) +
+  labs(
+    title = "Biaya Hidup vs Kemiskinan",
+    subtitle = "Kemiskinan tinggi ada di kedua ujung skala biaya hidup; Papua adalah kasus tersendiri",
+    x = "Garis Kemiskinan (Rp)",
+    y = "Persentase Penduduk Miskin (%)",
+    color = "Kelompok",
+    caption = "Sumber: BPS, September 2025"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    legend.position = "top",
+    plot.title = element_text(face = "bold")
+  )
+```
+
+#### Analisis
+* Riau dan Kalimantan Timur bukan outlier. Pada September, Riau memiliki garis kemiskinan Rp 747 ribu (peringkat 12 dari 38) dengan kemiskinan 6,30%, dan Kaltim Rp 898 ribu (peringkat 5) dengan 5,19%. Posisi ini sama dengan banyak provinsi lain yang berbiaya tinggi namun berkemiskinan rendah: DKI Jakarta (Rp 898 ribu; 4,03%), Kepulauan Riau (Rp 871 ribu; 4,26%), Kalimantan Utara (Rp 934 ribu; 5,47%), dan Bangka Belitung (Rp 992 ribu; 4,77%). Menyorot Riau dan Kaltim saja kurang tepat; kenaikan keduanya (+0,14 dan +0,02 poin) juga terlalu kecil untuk dijadikan dasar cerita "paradoks".
+
+* Pola yang sebenarnya menonjol ada di Papua dan sebagian Nusa Tenggara. Papua Pegunungan dan Papua Tengah memiliki garis kemiskinan tinggi (Rp 1,24 juta dan Rp 874 ribu) sekaligus kemiskinan tertinggi (27,21% dan 29,45%). Sebaliknya, NTT (Rp 563 ribu; 17,50%) dan Papua Selatan (Rp 587 ribu; 19,26%) memiliki garis rendah tetapi kemiskinan tinggi. Artinya, kemiskinan tinggi ditemukan di kedua ujung skala biaya hidup, dan tidak ada satu pola yang berlaku untuk semua provinsi.
+
+* Biaya hidup tinggi umumnya berjalan bersama kemiskinan rendah di luar Papua. Provinsi dengan garis tertinggi di luar Papua (Babel, Kaltara, DKI, Kaltim, Kepri) semuanya berkemiskinan 4,0–5,5%. Ini konsisten dengan hasil regresi pada bagian 6, yaitu hubungan negatif ketika Papua dikeluarkan. Interpretasi yang masuk akal, tetapi belum diuji di sini, adalah bahwa garis kemiskinan yang tinggi di daerah maju mencerminkan harga dan pola konsumsi yang lebih tinggi, dibarengi pendapatan yang juga lebih tinggi.
+
+## 5. Analisis Makro: Konsentrasi Absolut vs Tingkat Kemiskinan
+```{r data-pulau}
+data_pulau <- cleaned_panjang |> 
+  filter(periode == "September") |> 
+  mutate(
+    pulau = case_when(
+      str_detect(provinsi, "Aceh|Sumatera|Bangka|Riau|Jambi|Bengkulu|Lampung") ~ "Sumatera",
+      str_detect(provinsi, "Jakarta|Jawa|Yogyakarta|Banten") ~ "Jawa",
+      str_detect(provinsi, "Bali|Nusa Tenggara") ~ "Bali & Nusa Tenggara",
+      str_detect(provinsi, "Kalimantan") ~ "Kalimantan",
+      str_detect(provinsi, "Sulawesi|Gorontalo") ~ "Sulawesi",
+      str_detect(provinsi, "Maluku|Papua") ~ "Maluku & Papua",
+      TRUE ~ "Lainnya"
+    )
+  ) |> 
+  group_by(pulau) |> 
+  summarise(total_juta_jiwa = sum(jumlah_penduduk_miskin, na.rm = TRUE) / 1000) |> 
+  mutate(persen = (total_juta_jiwa / sum(total_juta_jiwa)) * 100) |> 
+  arrange(desc(total_juta_jiwa))
+
+print(data_pulau)
+```
+```{r plot-pulau, fig.width=9, fig.height=5}
+ggplot(data_pulau, aes(x = reorder(pulau, total_juta_jiwa), y = total_juta_jiwa)) +
+  geom_col(fill = "#2563EB", width = 0.7) +
+  geom_text(
+    aes(label = sprintf("%.1f Juta\n(%.1f%%)", total_juta_jiwa, persen)), 
+    hjust = -0.15,
+    size = 3.5, 
+    fontface = "bold",
+    color = "gray20"
+  ) +
+  coord_flip() +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.2))) +
+  labs(
+    title = "Sebaran Penduduk Miskin per Pulau",
+    subtitle = "Lebih dari 50% penduduk miskin Indonesia terkonsentrasi di Pulau Jawa",
+    x = NULL,
+    y = "Jumlah Penduduk Miskin (Juta Jiwa)",
+    caption = "Sumber: BPS, September 2025"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(color = "gray40"),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+```
+
+
+#### Konsentrasi Absolut vs Persentase
+* Grafik batang menunjukkan bahwa Jawa menampung 12,3 juta penduduk miskin (52,8% dari total nasional). Ini tidak berarti Jawa lebih bermasalah: populasi Jawa sekitar 55,7% dari total (estimasi dari jumlah ÷ persentase miskin), sehingga porsi penduduk miskinnya sedikit di bawah porsi penduduknya, dan tingkat kemiskinannya (7,8%) di bawah rata-rata nasional (8,25%). Jumlah absolut yang besar adalah akibat jumlah penduduk yang besar. Maluku & Papua hanya menyumbang 6,2% dari total penduduk miskin, tetapi porsinya lebih dari dua kali porsi penduduknya, dan tingkat kemiskinannya (18,2%) lebih dari dua kali rata-rata nasional. Bali & Nusa Tenggara juga di atas proporsi (7,8% vs 5,7%), terutama karena NTT dan NTB. Kalimantan sebaliknya paling rendah baik dalam porsi maupun tingkat.
+
+####  Implikasi Kebijakan:
+
+* Ukuran masalah dan intensitas masalah memerlukan strategi berbeda. Di Jawa, tantangannya adalah skala: penurunan tingkat kemiskinan yang kecil, misalnya 0,2 poin, setara dengan sekitar 300 ribu orang (0,2% dari sekitar 158 juta penduduk), sehingga program yang menjangkau banyak orang dengan biaya per kepala rendah memberi dampak absolut terbesar. Di Maluku & Papua serta Nusa Tenggara, tantangannya adalah intensitas: tingkat kemiskinan 11–18% dengan penduduk yang lebih sedikit, di wilayah yang juga lebih sulit dijangkau. Alasan penyebabnya (misalnya biaya logistik atau akses layanan dasar) adalah hipotesis kebijakan yang perlu data tambahan, bukan hasil analisis ini.
+
+## 6. Analisis Inferensial: Uji Regresi Linear
+```{r analisis-regresi, warning=FALSE, message=FALSE}
+model_kemiskinan <- lm(persentase_penduduk_miskin_september ~ I(garis_kemiskinan_september_rp / 1e5), 
+                       data = cleaned_data)
+
+summary(model_kemiskinan)
+
+r_squared <- summary(model_kemiskinan)$r.squared
+p_value <- summary(model_kemiskinan)$coefficients[2, 4]
+
+cat(sprintf("\nR-squared: %.3f\n", r_squared))
+cat(sprintf("P-value: %.5f\n", p_value))
+
+tidy(model_kemiskinan) |> 
+  knitr::kable(
+    caption = "Hasil Regresi Linear: Pengaruh Garis Kemiskinan terhadap Persentase Kemiskinan",
+    digits = 4
+  )
+
+m_tanpa_pegunungan <- update(model_kemiskinan,
+  data = filter(cleaned_data, provinsi != "Papua Pegunungan"))
+m_tanpa_papua <- update(model_kemiskinan,
+  data = filter(cleaned_data, !str_detect(provinsi, "Papua")))
+
+bind_rows(
+  "Semua provinsi"         = tidy(model_kemiskinan),
+  "Tanpa Papua Pegunungan" = tidy(m_tanpa_pegunungan),
+  "Tanpa 6 provinsi Papua" = tidy(m_tanpa_papua),
+  .id = "spesifikasi"
+) |>
+  filter(term != "(Intercept)") |>
+  select(spesifikasi, estimate, std.error, p.value) |>
+  knitr::kable(digits = 3,
+    caption = "Koefisien per Rp 100 ribu pada tiga spesifikasi")
+
+cor.test(cleaned_data$garis_kemiskinan_september_rp,
+         cleaned_data$persentase_penduduk_miskin_september, method = "spearman")
+```
+#### Analisis Regresi: Menguji hubungan garis kemiskinan dengan kemiskinan
+* Kami menguji apakah provinsi dengan garis kemiskinan (ambang pengeluaran minimum yang dipakai BPS) lebih tinggi memiliki persentase penduduk miskin yang berbeda. Garis kemiskinan di sini adalah ambang statistik, bukan ukuran langsung biaya hidup, sehingga hasilnya perlu dibaca sebagai hubungan, bukan sebab-akibat.
+Model pada 38 provinsi menghasilkan koefisien +1,03 poin persentase per kenaikan Rp 100 ribu (p = 0,122; R² = 0,065). Karena p > 0,05, data tidak cukup untuk menyimpulkan adanya hubungan, tetapi ini bukan bukti bahwa tidak ada hubungan: interval kepercayaan 95% koefisien lebar, yaitu −0,29 sampai +2,34 poin per Rp 100 ribu. R² 6,5% berarti garis kemiskinan hanya menjelaskan sebagian kecil variasi antarprovinsi; sisa 93,5% adalah variasi yang tidak dijelaskan model, yang bisa berasal dari banyak faktor yang tidak diukur di sini.
+
+* Korelasi peringkat Spearman pada 38 provinsi adalah −0,13 (p = 0,43), yaitu tidak ada hubungan monoton yang berarti. Dengan kata lain, kecenderungan positif pada model utama sepenuhnya berasal dari Papua Pegunungan, provinsi dengan garis kemiskinan tertinggi (Rp 1,24 juta) dan kemiskinan sangat tinggi. Setelah enam provinsi Papua dikeluarkan, hubungannya berbalik menjadi negatif dan signifikan.
+
+#### Implikasi kebijakan
+* Temuan ini tidak mendukung anggapan bahwa daerah dengan garis kemiskinan tinggi otomatis lebih miskin. Namun, regresi sederhana dengan satu prediktor tidak dapat menunjukkan faktor apa yang menjelaskan sisa variasi; pernyataan bahwa faktor struktural seperti pendidikan, infrastruktur, atau lapangan kerja lebih dominan adalah hipotesis yang masuk akal tetapi perlu diuji dengan data tambahan (misalnya rata-rata lama sekolah, tingkat partisipasi angkatan kerja, dan akses jalan dari BPS). Papua sebaiknya dianalisis sebagai kasus tersendiri, bukan dicampur dengan provinsi lain dalam satu model.
+
+```{r plot-regresi, fig.width=9, fig.height=6}
+data_tanpa_papua <- filter(cleaned_data, !str_detect(provinsi, "Papua"))
+
+ggplot(cleaned_data, aes(x = garis_kemiskinan_september_rp,
+                         y = persentase_penduduk_miskin_september)) +
+  geom_point(color = "#3B82F6", size = 3, alpha = 0.7) +
+  geom_smooth(method = "lm", color = "#EF4444", fill = "gray80", alpha = 0.5) +
+  geom_smooth(data = data_tanpa_papua, method = "lm", se = FALSE,
+              color = "#10B981", linetype = "dashed") +
+  geom_text(data = filter(cleaned_data, provinsi == "Papua Pegunungan"),
+            aes(label = provinsi), vjust = -1, hjust = 1, fontface = "bold") +
+  scale_x_continuous(labels = scales::label_number(scale = 1/1e6, prefix = "Rp ", suffix = " Juta")) +
+  scale_y_continuous(labels = scales::label_number(suffix = "%")) +
+  labs(
+    title = "Uji Regresi: Apakah Garis Kemiskinan Memprediksi Kemiskinan?",
+    subtitle = "Garis merah: 38 provinsi (naik karena Papua Pegunungan). Garis hijau: tanpa provinsi Papua (turun).",
+    x = "Garis Kemiskinan",
+    y = "Persentase Penduduk Miskin",
+    caption = "Sumber: BPS, September 2025"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(color = "gray40", margin = margin(b = 15)),
+    panel.grid.minor = element_blank()
+  )
+```
+
+#### Interpretasi Grafik Regresi
+* Garis regresi merah pada 38 provinsi tampak naik, tetapi kemiringannya dibentuk hampir seluruhnya oleh satu titik di kanan atas, yaitu Papua Pegunungan (garis kemiskinan Rp 1,24 juta; kemiskinan 27,21%). Pita abu-abu (selang kepercayaan 95%) yang lebar menunjukkan ketidakpastian yang besar, dan p = 0,122 berarti hubungan ini tidak dapat dibedakan dari nol. Setelah titik itu dikeluarkan, kemiringannya hampir datar (p = 0,975), dan tanpa enam provinsi Papua, kemiringannya negatif dan signifikan (p = 0,010).
+Dua hal perlu dibaca bersamaan. Pertama, sebaran titik yang sangat heterogen (R² 6,5%) menunjukkan garis kemiskinan tidak menjelaskan banyak variasi antarprovinsi. Kedua, provinsi dengan garis tinggi di luar Papua cenderung berkemiskinan rendah: Bali (Rp 643 ribu; 3,42%), DKI Jakarta (Rp 898 ribu; 4,03%), Kepulauan Riau (Rp 871 ribu; 4,26%), dan Bangka Belitung (Rp 992 ribu; 4,77%). Penjelasan yang masuk akal adalah bahwa biaya hidup yang tinggi di daerah tersebut diimbangi pendapatan dan kesempatan kerja yang lebih baik, tetapi data ini tidak mengukur pendapatan atau pekerjaan, jadi ini hipotesis, bukan hasil uji. Garis hijau putus-putus pada grafik menunjukkan kemiringan yang sama setelah enam provinsi Papua dikeluarkan.
+
+## 7. Kesimpulan & Implikasi Kebijakan
+Kemiskinan di Indonesia turun tipis pada semester II 2025 (8,47% → 8,25%), tetapi sebarannya sangat tidak merata, dan masalah terbesar bersifat spasial: tingkat kemiskinan tertinggi terkonsentrasi di Tanah Papua dan Nusa Tenggara, sedangkan jumlah orang terbesar ada di Jawa. Garis kemiskinan tidak menjelaskan perbedaan ini, sehingga kebijakan tidak bisa disusun hanya dari ukuran biaya hidup. Tiga implikasi berikut adalah hipotesis kebijakan yang konsisten dengan data, bukan hasil uji kausal:
+
+* Jawa: strategi skala. Jawa menampung 12,3 juta penduduk miskin (52,8%), sebanding dengan porsi penduduknya, dengan tingkat kemiskinan 7,8%. Penurunan 0,2 poin di Jawa setara sekitar 300 ribu orang, sehingga program berbiaya per kepala rendah yang menjangkau banyak orang (perlindungan sosial dan penciptaan kerja) memberi dampak absolut terbesar.
+
+* Papua dan Nusa Tenggara: strategi intensitas. Maluku & Papua (18,2%) dan Bali & Nusa Tenggara (11,3%) memiliki tingkat kemiskinan jauh di atas rata-rata nasional, dengan porsi penduduk miskin yang lebih besar dari porsi penduduknya. Garis kemiskinan di NTT dan NTB justru termasuk rendah (Rp 563 ribu dan Rp 576 ribu), sehingga kemiskinan di Nusa Tenggara lebih dekat dengan persoalan pendapatan dan kesempatan kerja daripada mahalnya biaya hidup. Di Papua, garis kemiskinan tinggi dan kemiskinan tinggi terjadi bersamaan; penyebabnya (logistik, akses layanan dasar, kualitas data) perlu dikaji tersendiri. Intervensi yang memperbaiki akses dasar (jalan, air bersih, layanan kesehatan dan pendidikan) lebih mungkin berdampak daripada transfer tunai saja, tetapi ini perlu dievaluasi, bukan diasumsikan.
+
+* Riau dan Kalimantan Timur: pantau, jangan simpulkan. Kenaikan keduanya (+0,14 dan +0,02 poin; +14,6 ribu dan +2,3 ribu orang) terlalu kecil untuk dibaca sebagai tren, dan data ini tidak memuat penyebabnya. Langkah yang beralasan adalah memantau apakah kenaikan berlanjut pada rilis Maret 2026 dan membandingkannya dengan data harga komoditas, inflasi daerah, dan lapangan kerja. Kenaikan Papua Tengah (+0,55 poin) justru lebih patut menjadi perhatian karena terjadi pada provinsi yang sudah termiskin.
+Keterbatasan analisis. Analisis ini memakai satu variabel penjelas (garis kemiskinan), dua periode, dan data survei sampel; hasil regresi sensitif terhadap provinsi Papua; dan sebab-akibat tidak diuji. Langkah lanjutan: tambahkan variabel struktural (pendidikan, kesehatan, tenaga kerja, infrastruktur), bandingkan dengan Maret 2026, dan analisis Papua sebagai kelompok tersendiri.
